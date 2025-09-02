@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Магазин — Mini App</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background:#0f1115; color:#f1f5f9; }
+    .wrap { max-width: 900px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 20px; margin: 0 0 12px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(240px,1fr)); gap: 12px; }
+    .card { background:#161a22; border:1px solid #232833; border-radius: 14px; padding: 14px; }
+    .card h3{ margin:0 0 8px; font-size:16px;}
+    .muted{color:#94a3b8; font-size:12px; }
+    .row{display:flex; align-items:center; justify-content:space-between; margin-top:10px;}
+    button { border:0; padding:10px 12px; border-radius:10px; cursor:pointer; }
+    .btn { background:#22c55e; color:#0b111f; font-weight:600; }
+    .btn-ghost{ background:#0f1115; color:#cbd5e1; border:1px solid #293042;}
+    .toolbar{display:flex; gap:8px; margin-bottom:10px; flex-wrap: wrap;}
+    .tag{padding:6px 10px; border:1px solid #293042; border-radius: 999px; cursor:pointer;}
+    a{color:#93c5fd}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Каталог</h1>
+    <div class="toolbar">
+      <span class="tag" data-filter="all">Все</span>
+      <span class="tag" data-filter="iphone">iPhone</span>
+      <span class="tag" data-filter="mac">Mac</span>
+      <span class="tag" data-filter="ipad">iPad</span>
+      <span class="tag" data-filter="watch">Watch</span>
+      <span class="tag" data-filter="audio">JBL/Наушники</span>
+      <span class="tag" data-filter="dyson">Dyson</span>
+    </div>
+    <div id="grid" class="grid"></div>
+    <p class="muted" id="hint">Совет: добавьте пару товаров в корзину и нажмите большую кнопку внизу.</p>
+  </div>
+
+  <script>
+    const tg = window.Telegram.WebApp;
+    tg.expand(); // разворачиваем окно
+    tg.setHeaderColor("#0f1115");
+    tg.setBackgroundColor("#0f1115");
+
+    // Товары (можешь править под себя)
+    const PRODUCTS = [
+      {id:"ip16p-128-desert", name:"iPhone 16 Pro 128 GB Desert", price:84000, tag:"iphone", stock:"В наличии"},
+      {id:"ip16p-256-natural", name:"iPhone 16 Pro 256 GB Natural", price:91500, tag:"iphone", stock:"В наличии"},
+      {id:"mac-air-m1-8-256", name:"MacBook Air M1 8/256", price:50500, tag:"mac", stock:"2 шт."},
+      {id:"ipad-10-64", name:"iPad 10th 64 GB", price:36500, tag:"ipad", stock:"Под заказ"},
+      {id:"aw-s10", name:"Apple Watch Series 10", price:38990, tag:"watch", stock:"В наличии"},
+      {id:"jbl-go3", name:"JBL GO 3", price:3490, tag:"audio", stock:"В наличии"},
+      {id:"dyson-hd07", name:"Dyson Supersonic HD07", price:29990, tag:"dyson", stock:"В наличии"}
+    ];
+
+    let filter = "all";
+    let cart = [];
+
+    function format(n){ return n.toLocaleString("ru-RU") + " ₽"; }
+    function render(){
+      const el = document.getElementById("grid");
+      el.innerHTML = "";
+      PRODUCTS.filter(p => filter==="all" || p.tag===filter).forEach(p=>{
+        const card = document.createElement("div"); card.className="card";
+        card.innerHTML = `
+          <h3>${p.name}</h3>
+          <div class="muted">${p.stock}</div>
+          <div class="row">
+            <div>${format(p.price)}</div>
+            <div>
+              <button class="btn-ghost" data-id="${p.id}" data-action="minus">−</button>
+              <span id="q-${p.id}" style="min-width:20px; display:inline-block; text-align:center;">${qty(p.id)}</span>
+              <button class="btn" data-id="${p.id}" data-action="plus">+ Добавить</button>
+            </div>
+          </div>`;
+        el.appendChild(card);
+      });
+      updateMainButton();
+    }
+
+    function qty(id){ return cart.find(i=>i.id===id)?.qty || 0; }
+    function total(){
+      return cart.reduce((s,i)=>{
+        const p = PRODUCTS.find(p=>p.id===i.id);
+        return s + (p.price * i.qty);
+      },0);
+    }
+    function updateMainButton(){
+      const t = total();
+      if(t>0){
+        tg.MainButton.setText("Оформить заказ • " + format(t));
+        tg.MainButton.show();
+      } else {
+        tg.MainButton.hide();
+      }
+    }
+
+    document.addEventListener("click",(e)=>{
+      const btn = e.target.closest("button");
+      const tag = e.target.closest(".tag");
+      if(tag){
+        filter = tag.dataset.filter;
+        render();
+      }
+      if(!btn) return;
+      const id = btn.dataset.id;
+      const action = btn.dataset.action;
+      if(!id) return;
+
+      const item = cart.find(i=>i.id===id);
+      if(action==="plus"){
+        if(item){ item.qty++; } else { cart.push({id, qty:1}); }
+      } else if(action==="minus"){
+        if(item){ item.qty--; if(item.qty<=0){ cart = cart.filter(i=>i.id!==id); } }
+      }
+      const q = document.getElementById("q-"+id);
+      if(q) q.textContent = qty(id);
+      updateMainButton();
+    });
+
+    tg.onEvent("mainButtonClicked", ()=>{
+      // Отправляем заказ в бота
+      const payload = {
+        type: "order",
+        items: cart.map(i=>{
+          const p = PRODUCTS.find(p=>p.id===i.id);
+          return { id: i.id, name: p.name, price: p.price, qty: i.qty };
+        }),
+        total: total(),
+        ts: Date.now()
+      };
+      tg.sendData(JSON.stringify(payload));
+    });
+
+    render();
+  </script>
+</body>
+</html>
