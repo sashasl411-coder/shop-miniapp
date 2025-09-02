@@ -6,8 +6,80 @@
   <title>Магазин — Mini App</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
+    /* Оверлей чекаута */
+.sheet {
+  position: fixed; inset: 0; background: rgba(0,0,0,.6);
+  display: none; align-items: flex-end; z-index: 50;
+}
+.sheet.open { display: flex; }
+.panel {
+  width: 100%; max-height: 88vh; overflow:auto;
+  background:#11141b; border-radius: 16px 16px 0 0; padding:16px;
+  border:1px solid #232833;
+}
+.panel h2{margin:0 0 12px; font-size:18px;}
+.field{display:flex; flex-direction:column; gap:6px; margin-bottom:10px;}
+.input, .textarea, .select {
+  background:#0f1115; color:#e5e7eb; border:1px solid #293042;
+  border-radius:10px; padding:10px 12px; outline:none;
+}
+.row2{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+.helper{font-size:12px; color:#94a3b8;}
+.bad{color:#ef4444;}
+.cartline{display:flex; justify-content:space-between; gap:8px; margin:6px 0;}
+.total{display:flex; justify-content:space-between; font-weight:700; margin-top:8px;}
+.radio-row{display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
+.radio{display:flex; gap:6px; align-items:center; border:1px solid #293042; padding:8px 10px; border-radius:999px; cursor:pointer;}
+.hidden{display:none;}
+.closex{position:absolute; right:14px; top:8px; opacity:.7; cursor:pointer;}
+
     body { font-family: system-ui, sans-serif; margin: 0; background:#0f1115; color:#f1f5f9; }
     .wrap { max-width: 900px; margin: 0 auto; padding: 16px; }
+    <div id="sheet" class="sheet">
+  <div class="panel">
+    <div class="closex" id="closeSheet">✕</div>
+    <h2>Оформление заказа</h2>
+
+    <div class="field">
+      <label>Имя</label>
+      <input id="f_name" class="input" placeholder="Как к вам обращаться">
+    </div>
+
+    <div class="field">
+      <label>Телефон <span class="helper">(для подтверждения)</span></label>
+      <input id="f_phone" class="input" placeholder="+7 9XX XXX-XX-XX">
+      <div id="err_phone" class="helper bad hidden">Введите корректный телефон</div>
+    </div>
+
+    <div class="field">
+      <label>Способ получения</label>
+      <div class="radio-row">
+        <label class="radio"><input type="radio" name="delivery" value="pickup" checked> Самовывоз</label>
+        <label class="radio"><input type="radio" name="delivery" value="courier"> Доставка</label>
+      </div>
+    </div>
+
+    <div id="addr_wrap" class="field hidden">
+      <label>Адрес доставки</label>
+      <input id="f_address" class="input" placeholder="Город, улица, дом, подъезд/этаж">
+    </div>
+
+    <div class="field">
+      <label>Комментарий</label>
+      <textarea id="f_comment" class="textarea" rows="2" placeholder="Например: нужен чек, позвонить за 30 мин."></textarea>
+    </div>
+
+    <div class="field">
+      <label>Ваш заказ</label>
+      <div id="cartPreview"></div>
+      <div class="total"><span>Итого</span><span id="cartSum">0 ₽</span></div>
+    </div>
+
+    <div class="helper">Нажимая «Подтвердить», вы оформляете заказ. Мы свяжемся для подтверждения и согласования времени.</div>
+    <div style="height:8px"></div>
+    <button id="btnConfirm" class="btn" style="width:100%">Подтвердить заказ</button>
+  </div>
+</div>
     h1 { font-size: 20px; margin: 0 0 12px; }
     .grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(240px,1fr)); gap: 12px; }
     .card { background:#161a22; border:1px solid #232833; border-radius: 14px; padding: 14px; }
@@ -39,6 +111,97 @@
   </div>
 
   <script>
+    // ==== ЧЕКАУТ ====
+const sheet = document.getElementById("sheet");
+const closeSheetBtn = document.getElementById("closeSheet");
+const f_name = document.getElementById("f_name");
+const f_phone = document.getElementById("f_phone");
+const f_address = document.getElementById("f_address");
+const f_comment = document.getElementById("f_comment");
+const addr_wrap = document.getElementById("addr_wrap");
+const cartPreview = document.getElementById("cartPreview");
+const cartSum = document.getElementById("cartSum");
+const err_phone = document.getElementById("err_phone");
+const btnConfirm = document.getElementById("btnConfirm");
+
+// Предзаполняем имя из Telegram, если есть
+const user = tg.initDataUnsafe?.user || {};
+f_name.value = [user.first_name, user.last_name].filter(Boolean).join(" ") || "";
+
+// Переключение адреса
+document.addEventListener("change", (e)=>{
+  if(e.target.name === "delivery"){
+    addr_wrap.classList.toggle("hidden", e.target.value !== "courier");
+  }
+});
+
+// Открыть/закрыть оверлей
+function openSheet(){ renderCartPreview(); sheet.classList.add("open"); tg.MainButton.hide(); }
+function closeSheet(){ sheet.classList.remove("open"); updateMainButton(); }
+closeSheetBtn.addEventListener("click", closeSheet);
+
+// Рендер превью корзины
+function renderCartPreview(){
+  cartPreview.innerHTML = "";
+  cart.forEach(i=>{
+    const p = PRODUCTS.find(p=>p.id===i.id);
+    if(!p) return;
+    const line = document.createElement("div");
+    line.className = "cartline";
+    line.innerHTML = `<span>${p.name} × ${i.qty}</span><span>${format(p.price*i.qty)}</span>`;
+    cartPreview.appendChild(line);
+  });
+  cartSum.textContent = format(total());
+}
+
+// Нажатие на большую кнопку теперь открывает форму
+tg.offEvent && tg.offEvent("mainButtonClicked"); // на всякий случай
+tg.onEvent("mainButtonClicked", openSheet);
+
+// Валидация телефона (простая)
+function validPhone(v){
+  const s = v.replace(/[^\d+]/g,"");
+  return /^(\+?\d){11,15}$/.test(s);
+}
+
+// Подтверждение заказа
+btnConfirm.addEventListener("click", ()=>{
+  const phone = f_phone.value.trim();
+  const name = f_name.value.trim() || (user.first_name || "");
+  const delivery = document.querySelector('input[name="delivery"]:checked').value;
+  const address = delivery === "courier" ? (f_address.value.trim()) : "";
+  const comment = f_comment.value.trim();
+
+  // Проверки
+  err_phone.classList.toggle("hidden", validPhone(phone));
+  if(!validPhone(phone)){ f_phone.focus(); return; }
+  if(delivery==="courier" && address.length < 8){ alert("Укажите адрес для доставки"); return; }
+  if(cart.length===0){ alert("Корзина пуста"); closeSheet(); return; }
+
+  // Собираем полезные поля
+  const items = cart.map(i=>{
+    const p = PRODUCTS.find(p=>p.id===i.id);
+    return { id: i.id, name: p.name, price: p.price, qty: i.qty };
+  });
+
+  const payload = {
+    type: "order",
+    order_id: "R" + Date.now().toString(36) + "-" + Math.floor(Math.random()*1e4).toString(36),
+    user: {
+      id: user.id, username: user.username, name
+    },
+    contact: { phone },
+    delivery: { method: delivery, address },
+    comment,
+    items,
+    total: total(),
+    ts: Date.now()
+  };
+
+  tg.sendData(JSON.stringify(payload)); // уходит боту
+  tg.close(); // закрыть мини-апп (можно убрать, если хочешь остаться в приложении)
+});
+
     const tg = window.Telegram.WebApp;
     tg.expand(); // разворачиваем окно
     tg.setHeaderColor("#0f1115");
@@ -138,3 +301,4 @@
   </script>
 </body>
 </html>
+
